@@ -96,6 +96,20 @@ app.post('/api/schedules', async (req, res) => {
   }
 });
 
+// 🗑️ API สำหรับลบตารางออด
+app.delete('/api/schedules/:id', async (req, res) => {
+  try {
+    const deletedSchedule = await Schedule.findByIdAndDelete(req.params.id);
+    if (deletedSchedule) {
+      // ⚡ สั่งให้แอปของโรงเรียนนั้นๆ รีเฟรชหน้าจอทันทีเมื่อมีคนกดลบ
+      io.to(deletedSchedule.schoolId).emit('scheduleUpdated'); 
+    }
+    res.json({ message: 'ลบตารางเรียบร้อยแล้ว!' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==========================================
 // 5. ระบบ REAL-TIME (Multi-tenant Socket)
 // ==========================================
