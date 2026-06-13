@@ -21,7 +21,7 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => console.log('🔴 MongoDB Error:', err));
 
 // ==========================================
-// 2. โครงสร้างข้อมูล (SCHEMA) แบบแยกโรงเรียน
+// 2. โครงสร้างข้อมูล (SCHEMA)
 // ==========================================
 const schoolSchema = new mongoose.Schema({
   schoolName: String,
@@ -35,12 +35,13 @@ const scheduleSchema = new mongoose.Schema({
   time: String,
   title: String,
   audio: String,
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  activeDays: { type: [Number], default: [1, 2, 3, 4, 5] } // 🚀 เพิ่มฟิลด์เก็บวัน (1=จันทร์...7=อาทิตย์)
 });
 const Schedule = mongoose.model('Schedule', scheduleSchema);
 
 // ==========================================
-// 3. API ระบบ ADMIN (ล็อกอิน / สมัคร)
+// 3. API ระบบ ADMIN
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -74,7 +75,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// 4. API จัดการตาราง (แยกตามโรงเรียน)
+// 4. API จัดการตารางออด (รองรับ activeDays)
 // ==========================================
 app.get('/api/schedules/:schoolId', async (req, res) => {
   try {
@@ -96,12 +97,21 @@ app.post('/api/schedules', async (req, res) => {
   }
 });
 
-// 🗑️ API สำหรับลบตารางออด
+// API อัปเดตตาราง (รวมถึงวัน)
+app.put('/api/schedules/:id', async (req, res) => {
+  try {
+    const updated = await Schedule.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    io.to(updated.schoolId).emit('scheduleUpdated');
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.delete('/api/schedules/:id', async (req, res) => {
   try {
     const deletedSchedule = await Schedule.findByIdAndDelete(req.params.id);
     if (deletedSchedule) {
-      // ⚡ สั่งให้แอปของโรงเรียนนั้นๆ รีเฟรชหน้าจอทันทีเมื่อมีคนกดลบ
       io.to(deletedSchedule.schoolId).emit('scheduleUpdated'); 
     }
     res.json({ message: 'ลบตารางเรียบร้อยแล้ว!' });
@@ -111,7 +121,7 @@ app.delete('/api/schedules/:id', async (req, res) => {
 });
 
 // ==========================================
-// 5. ระบบ REAL-TIME (Multi-tenant Socket)
+// 5. ระบบ REAL-TIME
 // ==========================================
 io.on('connection', (socket) => {
   socket.on('joinSchool', (schoolId) => {
