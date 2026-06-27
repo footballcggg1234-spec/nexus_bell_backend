@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+const cors = require('cors'); // 👈 เพิ่มสิ่งนี้เข้ามา
 
 dotenv.config();
 const app = express();
@@ -12,6 +13,13 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*" }
 });
+
+// 👈 เปิดใช้งาน CORS ให้อนุญาตการเชื่อมต่อจากหน้าเว็บ (สำคัญมากสำหรับการล็อกอิน)
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type']
+}));
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
@@ -36,7 +44,6 @@ const Schedule = mongoose.model('Schedule', scheduleSchema);
 io.on('connection', (socket) => {
   console.log(`⚡ มีอุปกรณ์เชื่อมต่อเข้ามา: ${socket.id}`);
 
-  // รับคำสั่งแมนนวลจากหน้าเว็บแล้วส่งกระจายไปให้แอป Flutter ปลายทาง
   socket.on('force_play_bell', (audioFile) => {
     console.log(`🔔 สั่งเล่นเสียงด่วนจากหน้าเว็บ: ${audioFile}`);
     io.emit('play_bell_now', { audio: audioFile }); 
@@ -56,7 +63,7 @@ io.on('connection', (socket) => {
 
 // 🔐 ระบบเข้าสู่ระบบ (Login)
 const ADMIN_USER = 'admin';
-const ADMIN_PASS = '12345678'; // รหัสผ่านค่าเริ่มต้น
+const ADMIN_PASS = '12345678';
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
