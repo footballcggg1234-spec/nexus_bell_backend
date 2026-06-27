@@ -1,26 +1,15 @@
 {
-  "name": "nexus_bell_online",
+  "name": "smartbell-server",
   "version": "1.0.0",
-  "description": "A new Flutter project.",
-  "main": "index.js",
-  "directories": {
-    "lib": "lib",
-    "test": "test"
-  },
+  "description": "SmartBell Control Server",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js" 
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "bcrypt": "^6.0.0",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "mongoose": "^9.7.0",
-    "socket.io": "^4.8.3"
+    "dotenv": "^16.x.x",
+    "express": "^4.x.x",
+    "mongoose": "^8.x.x",
+    "socket.io": "^4.x.x"
   }
 }

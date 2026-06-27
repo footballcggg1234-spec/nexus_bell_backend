@@ -1,138 +1,120 @@
-require('dotenv').config();
 const express = require('express');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const bcrypt = require('bcrypt'); 
 
+dotenv.config();
 const app = express();
-app.use(cors());
-app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-// ==========================================
-// 1. เชื่อมต่อ MONGODB
-// ==========================================
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('🟢 MongoDB Connected! ระบบฐานข้อมูลออนไลน์ทำงานแล้ว'))
-  .catch(err => console.log('🔴 MongoDB Error:', err));
-
-// ==========================================
-// 2. โครงสร้างข้อมูล (SCHEMA)
-// ==========================================
-const schoolSchema = new mongoose.Schema({
-  schoolName: String,
-  email: { type: String, unique: true },
-  password: String
+const io = new Server(server, {
+  cors: { origin: "*" }
 });
-const School = mongoose.model('School', schoolSchema);
 
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// 🗄️ เชื่อมต่อ MongoDB
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/smartbell')
+  .then(() => console.log('✅ เชื่อมต่อ MongoDB สำเร็จพร้อมลุย!'))
+  .catch(err => console.error('❌ เชื่อมต่อ MongoDB พลาด:', err));
+
+// 📝 แบบแปลนข้อมูล (Schema)
 const scheduleSchema = new mongoose.Schema({
-  schoolId: String, 
   time: String,
   title: String,
   audio: String,
-  isActive: { type: Boolean, default: true },
-  activeDays: { type: [Number], default: [1, 2, 3, 4, 5] } // 🚀 เพิ่มฟิลด์เก็บวัน (1=จันทร์...7=อาทิตย์)
+  activeDays: [Number], 
+  isActive: { type: Boolean, default: true }
 });
 const Schedule = mongoose.model('Schedule', scheduleSchema);
 
-// ==========================================
-// 3. API ระบบ ADMIN
-// ==========================================
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { schoolName, email, password } = req.body;
-    const existingSchool = await School.findOne({ email });
-    if (existingSchool) return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานแล้ว!' });
+// ================= 🔌 ระบบ Socket.io Real-time =================
+io.on('connection', (socket) => {
+  console.log(`⚡ มีอุปกรณ์เชื่อมต่อเข้ามา: ${socket.id}`);
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newSchool = new School({ schoolName, email, password: hashedPassword });
-    await newSchool.save();
-    
-    res.status(201).json({ schoolId: newSchool._id, schoolName: newSchool.schoolName });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  // รับคำสั่งแมนนวลจากหน้าเว็บแล้วส่งกระจายไปให้แอป Flutter ปลายทาง
+  socket.on('force_play_bell', (audioFile) => {
+    console.log(`🔔 สั่งเล่นเสียงด่วนจากหน้าเว็บ: ${audioFile}`);
+    io.emit('play_bell_now', { audio: audioFile }); 
+  });
+
+  socket.on('force_stop_bell', () => {
+    console.log(`🛑 สั่งหยุดเสียงฉุกเฉิน!`);
+    io.emit('stop_bell_now'); 
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`🔴 อุปกรณ์ยกเลิกการเชื่อมต่อ: ${socket.id}`);
+  });
+});
+
+// ================= 🚀 API ROUTES =================
+
+// 🔐 ระบบเข้าสู่ระบบ (Login)
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = '12345678'; // รหัสผ่านค่าเริ่มต้น
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    res.json({ success: true, message: 'เข้าสู่ระบบสำเร็จ' });
+  } else {
+    res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+// ดึงข้อมูล
+app.get('/api/schedules', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const school = await School.findOne({ email });
-    if (!school) return res.status(400).json({ message: 'ไม่พบอีเมลนี้ในระบบ!' });
-
-    const isMatch = await bcrypt.compare(password, school.password);
-    if (!isMatch) return res.status(400).json({ message: 'รหัสผ่านไม่ถูกต้อง!' });
-
-    res.json({ schoolId: school._id, schoolName: school.schoolName });
+    const schedules = await Schedule.find().sort({ time: 1 });
+    res.json(schedules); 
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'ดึงข้อมูลไม่สำเร็จ' });
   }
 });
 
-// ==========================================
-// 4. API จัดการตารางออด (รองรับ activeDays)
-// ==========================================
-app.get('/api/schedules/:schoolId', async (req, res) => {
-  try {
-    const schedules = await Schedule.find({ schoolId: req.params.schoolId }).sort({ time: 1 });
-    res.json(schedules);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
+// เพิ่มข้อมูล
 app.post('/api/schedules', async (req, res) => {
   try {
     const newSchedule = new Schedule(req.body);
     await newSchedule.save();
-    io.to(req.body.schoolId).emit('scheduleUpdated'); 
-    res.status(201).json(newSchedule);
+    io.emit('schedule_updated'); 
+    res.status(201).json({ message: 'บันทึกสำเร็จ!', schedule: newSchedule });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'บันทึกไม่สำเร็จ' });
   }
 });
 
-// API อัปเดตตาราง (รวมถึงวัน)
-app.put('/api/schedules/:id', async (req, res) => {
+// สลับสถานะเปิด-ปิด
+app.put('/api/schedules/:id/toggle', async (req, res) => {
   try {
-    const updated = await Schedule.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    io.to(updated.schoolId).emit('scheduleUpdated');
-    res.json(updated);
+    const schedule = await Schedule.findById(req.params.id);
+    schedule.isActive = !schedule.isActive; 
+    await schedule.save();
+    io.emit('schedule_updated'); 
+    res.json({ message: 'อัปเดตสถานะสำเร็จ', isActive: schedule.isActive });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'อัปเดตสถานะไม่สำเร็จ' });
   }
 });
 
+// ลบข้อมูล
 app.delete('/api/schedules/:id', async (req, res) => {
   try {
-    const deletedSchedule = await Schedule.findByIdAndDelete(req.params.id);
-    if (deletedSchedule) {
-      io.to(deletedSchedule.schoolId).emit('scheduleUpdated'); 
-    }
-    res.json({ message: 'ลบตารางเรียบร้อยแล้ว!' });
+    await Schedule.findByIdAndDelete(req.params.id);
+    io.emit('schedule_updated'); 
+    res.json({ message: 'ลบข้อมูลสำเร็จ' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'ลบข้อมูลไม่สำเร็จ' });
   }
-});
-
-// ==========================================
-// 5. ระบบ REAL-TIME
-// ==========================================
-io.on('connection', (socket) => {
-  socket.on('joinSchool', (schoolId) => {
-    socket.join(schoolId);
-    console.log(`📱 อุปกรณ์เข้าร่วมห้องโรงเรียน: ${schoolId}`);
-  });
-
-  socket.on('toggleSystem', (data) => {
-    io.to(data.schoolId).emit('systemStatusChanged', { isOnline: data.isOnline });
-  });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Server Running on Port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🚀 ระบบศูนย์ควบคุมรันอยู่ที่ http://localhost:${PORT}`);
+});
